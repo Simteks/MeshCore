@@ -1,6 +1,7 @@
 #include <Arduino.h>   // needed for PlatformIO
 #include <Mesh.h>
 #include "MyMesh.h"
+#include <boot/BootSequence.h>
 
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
@@ -91,8 +92,19 @@ void halt() {
 
 void setup() {
   Serial.begin(115200);
-
+  // On ESP32-S3 (USB-CDC), wait briefly so the host attaches and we don't miss early logs
+#ifdef ESP32
+  unsigned long _t0 = millis();
+  // Wait up to ~4s for host to enumerate USB CDC and attach monitor
+  while (!Serial && (millis() - _t0) < 4000) { delay(10); }
+  delay(150);
+  Serial.println("[boot] Serial online — starting boot checklist...");
+  Serial.flush();
+#endif
+  boot::begin("companion_ble", FIRMWARE_VERSION, FIRMWARE_BUILD_DATE);
+  boot::init_pins();
   board.begin();
+  boot::step("Board begin", true);
 
 #ifdef DISPLAY_CLASS
   DisplayDriver* disp = NULL;
@@ -104,9 +116,15 @@ void setup() {
   }
 #endif
 
-  if (!radio_init()) { halt(); }
+  boot::init_spi(BOARD_SPI_SCLK, BOARD_SPI_MISO, BOARD_SPI_MOSI);
+  boot::init_i2c(PIN_BOARD_SDA, PIN_BOARD_SCL);
 
+  if (!radio_init()) { boot::step("Radio init", false); halt(); }
+  boot::step("Radio init", true);
+
+  // RNG
   fast_rng.begin(radio_get_rng_seed());
+  boot::step("RNG begin", true);
 
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   InternalFS.begin();
@@ -118,6 +136,10 @@ void setup() {
         false
     #endif
   );
+  boot::step("Mesh begin", true);
+  boot::log_radio_params(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_TX_POWER);
+  boot::print_hw_summary();
+  boot::end();
 
 #ifdef BLE_PIN_CODE
   char dev_name[32+16];
@@ -154,8 +176,11 @@ void setup() {
   #endif
     the_mesh.startInterface(serial_interface);
 #elif defined(ESP32)
-  SPIFFS.begin(true);
+  // FS
+  bool fs_ok = SPIFFS.begin(true);
+  boot::step("SPIFFS begin", fs_ok);
   store.begin();
+  boot::step("DataStore begin", true);
   the_mesh.begin(
     #ifdef DISPLAY_CLASS
         disp != NULL
@@ -163,6 +188,7 @@ void setup() {
         false
     #endif
   );
+  boot::step("Mesh begin", true);
 
 #ifdef WIFI_SSID
   WiFi.begin(WIFI_SSID, WIFI_PWD);
@@ -171,23 +197,33 @@ void setup() {
   char dev_name[32+16];
   sprintf(dev_name, "%s%s", BLE_NAME_PREFIX, the_mesh.getNodeName());
   serial_interface.begin(dev_name, the_mesh.getBLEPin());
+  boot::step("BLE begin", true);
 #elif defined(SERIAL_RX)
   companion_serial.setPins(SERIAL_RX, SERIAL_TX);
   companion_serial.begin(115200);
   serial_interface.begin(companion_serial);
+  boot::step("UART begin", true);
 #else
   serial_interface.begin(Serial);
+  boot::step("Serial IF begin", true);
 #endif
   the_mesh.startInterface(serial_interface);
+  boot::step("Interface start", true);
 #else
   #error "need to define filesystem"
 #endif
 
-  sensors.begin();
+  bool sens_ok = sensors.begin();
+  boot::step("Sensors begin", sens_ok);
 
 #ifdef DISPLAY_CLASS
-  ui_task.begin(disp, &sensors, the_mesh.getNodePrefs());  // still want to pass this in as dependency, as prefs might be moved
+  ui_task.begin(disp, &sensors, the_mesh.getNodePrefs());
+  boot::step("UI begin", true);
 #endif
+
+  // Finalize boot checklist (terminal + EPD)
+  boot::step("Setup done", true);
+  boot::end();
 }
 
 void loop() {

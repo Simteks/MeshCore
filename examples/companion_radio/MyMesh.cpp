@@ -1555,6 +1555,10 @@ void MyMesh::loop() {
 #ifdef DISPLAY_CLASS
   ui_task.setHasConnection(_serial->isConnected());
 #endif
+
+  // Cooperatively yield to keep the scheduler and task watchdog happy during busy periods.
+  // Use a 1ms tick to ensure IDLE0 runs and feeds the watchdog on ESP32-S3.
+  delay(1);
 }
 
 bool MyMesh::advert() {

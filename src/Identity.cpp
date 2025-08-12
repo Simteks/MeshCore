@@ -4,6 +4,36 @@
 #include <ed_25519.h>
 #include <Ed25519.h>
 
+#if defined(ESP32)
+#include <esp_task_wdt.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+// RAII guard to temporarily suspend the task watchdog around heavy crypto
+class Esp32WdtSuspendGuard {
+  bool _suspended;
+public:
+  Esp32WdtSuspendGuard() : _suspended(false) {
+    // Deregister current task from WDT if active; ignore errors if not registered
+    TaskHandle_t h = xTaskGetCurrentTaskHandle();
+    if (h) {
+      esp_err_t err = esp_task_wdt_delete(h);
+      if (err == ESP_OK) {
+        _suspended = true;
+      }
+    }
+  }
+  ~Esp32WdtSuspendGuard() {
+    if (_suspended) {
+      TaskHandle_t h = xTaskGetCurrentTaskHandle();
+      if (h) {
+        // Re-register current task to WDT; ignore errors if WDT not initialized
+        (void)esp_task_wdt_add(h);
+      }
+    }
+  }
+};
+#endif
+
 namespace mesh {
 
 Identity::Identity() {
@@ -19,6 +49,9 @@ bool Identity::verify(const uint8_t* sig, const uint8_t* message, int msg_len) c
   // NOTE:  memory corruption bug was found in this function!!
   return ed25519_verify(sig, message, msg_len, pub_key);
 #else
+#if defined(ESP32)
+  Esp32WdtSuspendGuard guard; // verification can take time; avoid tripping task WDT
+#endif
   return Ed25519::verify(sig, this->pub_key, message, msg_len);
 #endif
 }
@@ -45,6 +78,9 @@ LocalIdentity::LocalIdentity(const char* prv_hex, const char* pub_hex) : Identit
 LocalIdentity::LocalIdentity(RNG* rng) {
   uint8_t seed[SEED_SIZE];
   rng->random(seed, SEED_SIZE);
+#if defined(ESP32)
+  Esp32WdtSuspendGuard guard; // key generation is CPU-heavy
+#endif
   ed25519_create_keypair(pub_key, prv_key, seed);
 }
 
@@ -84,15 +120,24 @@ void LocalIdentity::readFrom(const uint8_t* src, size_t len) {
   } else if (len == PRV_KEY_SIZE) {
     memcpy(prv_key, src, PRV_KEY_SIZE);
     // now need to re-calculate the pub_key
+#if defined(ESP32)
+    Esp32WdtSuspendGuard guard; // derivation uses heavy math
+#endif
     ed25519_derive_pub(pub_key, prv_key);
   }
 }
 
 void LocalIdentity::sign(uint8_t* sig, const uint8_t* message, int msg_len) const {
+#if defined(ESP32)
+  Esp32WdtSuspendGuard guard; // signing is CPU-heavy
+#endif
   ed25519_sign(sig, message, msg_len, pub_key, prv_key);
 }
 
 void LocalIdentity::calcSharedSecret(uint8_t* secret, const uint8_t* other_pub_key) {
+#if defined(ESP32)
+  Esp32WdtSuspendGuard guard; // ECDH is CPU-heavy
+#endif
   ed25519_key_exchange(secret, other_pub_key, prv_key);
 }
 

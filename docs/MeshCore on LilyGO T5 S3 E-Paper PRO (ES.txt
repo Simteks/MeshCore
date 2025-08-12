@@ -1,0 +1,444 @@
+MeshCore on LilyGO T5 S3 E-Paper PRO (ESP32‑S3) – Integration Plan
+Author: GitHub Copilot
+Date: <auto>
+
+Summary
+- Goal: Add a new MeshCore variant for the LilyGO T5 S3 E‑Paper PRO (4.7"), integrating LoRa (SX1262), power/battery sensing, optional GPS, and optional e‑paper UI.
+- Approach: Follow existing variant patterns (see variants/meshadventurer and variants/thinknode_m1) to add a new board class, radio wrapper, and PlatformIO envs without pulling in the standalone demo project’s build system or libraries.
+
+References in this repo
+- Core device abstraction and required virtuals: src/MeshCore.h (class mesh::MainBoard)
+- Example variant patterns:
+  - variants/meshadventurer/target.h
+  - variants/meshadventurer/target.cpp
+  - src/helpers/MeshadventurerBoard.h
+  - variants/thinknode_m1/target.cpp
+- Example apps to build for the variant:
+  - examples/companion_radio/main.cpp
+  - examples/simple_repeater/main.cpp
+  - examples/simple_room_server/main.cpp
+  - examples/simple_sensor/main.cpp (optional)
+- Build system:
+  - platformio.ini (root) – includes variants/*/platformio.ini
+  - build.sh (optional release pipeline)
+
+Why we won’t “mash” projects
+- The attached T5S3-4.7-e-paper-PRO is a standalone PlatformIO project with its own lib/ and .pio/. We will NOT reuse its build or libs directly.
+- We will:
+  - Extract only necessary hardware definitions (pins, board JSON, peripheral init hints).
+  - Implement a MeshCore-native variant with minimal, controlled dependencies using RadioLib already declared in root platformio.ini.
+  - Keep the vendor demo as a reference only; do not include it in PlatformIO build scope.
+
+Hardware overview (from vendor demo contents)
+- MCU: ESP32‑S3
+- LoRa: SX1262 (via SPI)
+- Display: 4.7" EPD (ED047TC1), TPS65185 supply, IO expander PCA9535 (likely controls panel rails / power)
+- GPS: u-blox MIA-M10Q (UART)
+- Battery/Power: BQ25896 (charger), BQ27220 (fuel gauge)
+- RTC: PCF8563 (I2C)
+- Other libs in vendor demo: EPDiy, LVGL, RadioLib, XPowersLib, TinyGPSPlus, SensorLib
+- variants\lilygo_t5_s3_eink_GPS\T5S3-4.7-e-paper-PRO\examples\factory - contains working implementation for the new hardware.
+
+Milestones
+1) Skeleton variant (LoRa + basic board)
+   - Create variant folder: variants/t5s3_eink_pro/
+   - Add:
+     - variants/t5s3_eink_pro/variant.h: pin defines (LoRa SPI/CS/RESET/BUSY/DIO1; LED; VBAT pin; GPS UART pins; I2C if needed), ADC multipliers
+     - variants/t5s3_eink_pro/target.h and target.cpp: instantiate RadioLib Module and wrapper; clocks; MicroNMEALocationProvider on Serial1 (optional gated by HAS_GPS)
+     - variants/t5s3_eink_pro/T5S3EinkBoard.h: board class derived from mesh::MainBoard (or ESP32Board if available), implement:
+       - uint16_t getBattMilliVolts()
+       - const char* getManufacturerName()
+       - reboot() and optional powerOff()
+       - onBeforeTransmit()/onAfterTransmit() for LED if present
+       - startOTAUpdate (optional, later)
+   - Add board file: boards/T5-ePaper-S3.json (copy from vendor project boards/T5-ePaper-S3.json; verify flash/PSRAM settings).
+   - Add PlatformIO envs in variants/t5s3_eink_pro/platformio.ini:
+     - T5S3_eink_companion_ble (src_dir = examples/companion_radio)
+     - T5S3_eink_repeater (src_dir = examples/simple_repeater)
+     - T5S3_eink_room_server (src_dir = examples/simple_room_server)
+   - Ensure envs extend [esp32_base] and [esp32_ota] (for OTA later). Root file: platformio.ini.
+
+2) Battery measurement and identity store
+   - Implement getBattMilliVolts():
+     - Use ADC1 channel and divider values from board docs/vendor code; if unknown, start with a conservative ADC_MULTIPLIER, and refine after bring-up.
+     - Follow patterns in src/helpers/MeshadventurerBoard.h and src/helpers/rp2040/PicoWBoard.h.
+   - Confirm IdentityStore usage:
+     - For ESP32, examples use SPIFFS; paths like "/identity" (see examples/simple_secure_chat/main.cpp and examples/companion_radio/MyMesh.cpp).
+
+3) Radio bring-up
+   - In target.cpp:
+     - RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY, SPI or a dedicated SPIClass);
+     - WRAPPER_CLASS radio_driver(radio, board);
+     - radio_init(): init SPI, LoRa pins; call radio_driver.begin(); set default params
+     - radio_set_params(), radio_set_tx_power() – mirror variants/meshadventurer/target.cpp
+     - radio_get_rng_seed(): return hardware RNG or radio RSSI noise as per existing variants
+     - radio_new_identity(): see variants/meshadventurer/target.cpp and examples/companion_radio/MyMesh.cpp usage; ensure reserved pubkey handling
+
+4) GPS (optional in v1)
+   - If GPS present:
+     - #define HAS_GPS and provide GPS pins in variant.h
+     - Instantiate MicroNMEALocationProvider on Serial1 in target.cpp (see variants/meshadventurer/target.h/.cpp)
+     - Board::begin() should power GPS (GPIO or power rail if controlled by IO expander) before Serial1 begin
+
+5) Display (e‑paper) integration (phase 2)
+   - Defer for initial merge to avoid large deps (EPDiy/LVGL).
+   - Later:
+     - Create a DISPLAY_CLASS adapter similar to helpers/ui/SSD1306Display.h interface used by examples/companion_radio (UI optional).
+     - Provide minimal text rendering pipeline (frame buffer push per refresh) to show node name, status, and BLE PIN.
+     - Manage panel power: through PCA9535 and TPS65185 sequencing (from vendor docs: docs/tps65185.pdf, docs/pca9535.pdf).
+     - Add DISPLAY_CLASS define in env and wire UI as in examples/companion_radio/main.cpp.
+
+6) Power rails and IO expander (phase 2)
+   - If EPD power requires TPS65185 + PCA9535 control:
+     - Create a small driver under variants/t5s3_eink_pro/ for power sequencing (init, enable VGL/VGH, reading OK signals).
+     - Call from board.begin() guarded by DISPLAY_CLASS only.
+
+7) Fuel gauge/charger (optional)
+   - Optional integration of BQ27220 and BQ25896 via I2C to replace raw ADC battery estimates.
+   - Implement in board class or as a sensor provider; keep optional to avoid new dependencies in base firmware.
+
+8) PlatformIO configuration details
+   - New file: variants/t5s3_eink_pro/platformio.ini
+     - For each env:
+       - extends = esp32_base and esp32_ota
+       - board = T5-ePaper-S3
+       - src_dir = examples/<app>
+       - build_flags additions:
+         - -I variants/t5s3_eink_pro
+         - -D USE_SX1262
+         - Pin and feature macros if not placed in variant.h (prefer putting in variant.h)
+       - build_src_filter:
+         - ${arduino_base.build_src_filter}
+         - +<variants/t5s3_eink_pro/*.cpp>
+     - Keep dependencies minimal; use root-declared RadioLib. Do not add EPDiy/LVGL until display phase.
+   - Ensure root platformio.ini already includes extra_configs = variants/*/platformio.ini (it does).
+
+9) Files to add (expected layout)
+   - boards/T5-ePaper-S3.json
+   - variants/t5s3_eink_pro/
+     - platformio.ini
+     - variant.h
+     - target.h
+     - target.cpp
+     - T5S3EinkBoard.h
+     - (optional later) EPD power helpers, display class adapter
+
+10) Pin map (to collect from vendor project)
+   - From the attached T5S3-4.7-e-paper-PRO/boards/T5-ePaper-S3.json and examples, extract:
+     - LoRa: P_LORA_NSS, P_LORA_BUSY, P_LORA_RESET, P_LORA_DIO_1
+     - SPI bus pins (SCK/MISO/MOSI) if custom (else HSPI/VSPI defaults)
+     - LED_PIN (if any)
+     - PIN_VBAT_READ and ADC_MULTIPLIER
+     - GPS_TX_PIN, GPS_RX_PIN and GPS power pin(s)
+     - I2C pins for IO expander/RTC (SDA/SCL)
+   - Add defines to variants/t5s3_eink_pro/variant.h (example format in variants/meshadventurer/variant.h)
+
+11) Initial build targets and tests
+   - Build without display/GPS first:
+     - pio run -e T5S3_eink_companion_ble
+     - pio run -e T5S3_eink_repeater
+     - pio run -e T5S3_eink_room_server
+   - Flash and verify:
+     - Radio init ok, self advert sent (see examples/companion_radio/MyMesh.cpp begin() and examples/simple_repeater/main.cpp begin()).
+     - Identity generation and persisted storage (SPIFFS).
+     - Battery mv reporting via CLI (CommonCLI integration; see src/helpers/CommonCLI.h and example apps using _cli).
+   - Then enable GPS and validate NMEA lock reporting via telemetry.
+   - Phase 2: add DISPLAY_CLASS and verify rendering + refresh timing.
+
+12) Common pitfalls and resolutions
+   - Do not include the vendor project’s lib/ in MeshCore build; keep variant self-contained.
+   - Avoid duplicate RadioLib versions by relying on root platformio.ini’s declared version.
+   - If SPI bus conflicts (shared with EPD), ensure LoRa and display are not active simultaneously in early versions; serialize access, or use separate SPI buses if hardware supports.
+   - ESP32‑S3 PSRAM/flash settings must match board JSON; wrong settings can cause random crashes.
+   - If OTA is needed, add AsyncElegantOTA (root [esp32_ota] has it) and implement startOTAUpdate in the board class later.
+
+13) Example snippets (to implement in variant)
+- target.h pattern: see variants/meshadventurer/target.h for includes, externs, and functions to expose: radio_init(), radio_get_rng_seed(), radio_set_params(), radio_set_tx_power(), radio_new_identity().
+- Board class methods: see src/helpers/MeshadventurerBoard.h and src/helpers/rp2040/PicoWBoard.h for getBattMilliVolts() patterns and manufacturer strings.
+- Example apps expect target.h and board globals; see variants/meshadventurer/target.cpp.
+
+14) Acceptance criteria
+- All three firmware types compile and run on T5 S3 without display:
+  - Companion: app pairing and basic messaging over LoRa works.
+  - Repeater: self advert and forwarding works, CLI reachable over serial.
+  - Room Server: self advert, posts storage in FS, CLI admin works.
+- Battery voltage returns reasonable values.
+- No unintended dependencies from vendor project are introduced.
+- Optional: GPS lock reported in telemetry (phase 1.1).
+- Optional: e‑paper UI (phase 2) functional with clean power sequencing.
+
+Appendix A – PIO env template (to be placed in variants/t5s3_eink_pro/platformio.ini)
+[env:T5S3_eink_companion_ble]
+extends = esp32_base, esp32_ota
+board = T5-ePaper-S3
+src_dir = examples/companion_radio
+build_flags =
+  ${esp32_base.build_flags}
+  -I variants/t5s3_eink_pro
+  -D USE_SX1262
+build_src_filter =
+  ${esp32_base.build_src_filter}
+  +<variants/t5s3_eink_pro/*.cpp>
+
+[env:T5S3_eink_repeater]
+extends = esp32_base
+board = T5-ePaper-S3
+src_dir = examples/simple_repeater
+build_flags =
+  ${esp32_base.build_flags}
+  -I variants/t5s3_eink_pro
+  -D USE_SX1262
+build_src_filter =
+  ${esp32_base.build_src_filter}
+  +<variants/t5s3_eink_pro/*.cpp>
+
+[env:T5S3_eink_room_server]
+extends = esp32_base
+board = T5-ePaper-S3
+src_dir = examples/simple_room_server
+build_flags =
+  ${esp32_base.build_flags}
+  -I variants/t5s3_eink_pro
+  -D USE_SX1262
+build_src_filter =
+  ${esp32_base.build_src_filter}
+  +<variants/t5s3_eink_pro/*.cpp>
+
+Appendix B – Initial variant.h checklist (pins/macros)
+- Define:
+  - P_LORA_NSS, P_LORA_BUSY, P_LORA_RESET, P_LORA_DIO_1
+  - Optional SX126X_RXEN (if needed by wrapper)
+  - LED_PIN (if present)
+  - PIN_VBAT_READ, ADC_MULTIPLIER (or VBAT_DIVIDER)
+  - GPS_RX_PIN, GPS_TX_PIN, PIN_GPS_EN (if gated)
+  - I2C_SDA, I2C_SCL
+  - USE_SX1262
+- Optionally HAS_GPS and DISPLAY_CLASS for later phases.
+
+Notes
+- Use existing code patterns to minimize risk:
+  - target glue: variants/meshadventurer/target.cpp
+  - board abstraction: src/helpers/MeshadventurerBoard.h
+- Keep display and advanced power rails for phase 2 to ensure early success on core MeshCore features.
+```// filepath: docs/t5s3-eink-meshcore-integration-plan.txt
+MeshCore on LilyGO T5 S3 E-Paper PRO (ESP32‑S3) – Integration Plan
+Author: GitHub Copilot
+Date: <auto>
+
+Summary
+- Goal: Add a new MeshCore variant for the LilyGO T5 S3 E‑Paper PRO (4.7"), integrating LoRa (SX1262), power/battery sensing, optional GPS, and optional e‑paper UI.
+- Approach: Follow existing variant patterns (see variants/meshadventurer and variants/thinknode_m1) to add a new board class, radio wrapper, and PlatformIO envs without pulling in the standalone demo project’s build system or libraries.
+
+References in this repo
+- Core device abstraction and required virtuals: src/MeshCore.h (class mesh::MainBoard)
+- Example variant patterns:
+  - variants/meshadventurer/target.h
+  - variants/meshadventurer/target.cpp
+  - src/helpers/MeshadventurerBoard.h
+  - variants/thinknode_m1/target.cpp
+- Example apps to build for the variant:
+  - examples/companion_radio/main.cpp
+  - examples/simple_repeater/main.cpp
+  - examples/simple_room_server/main.cpp
+  - examples/simple_sensor/main.cpp (optional)
+- Build system:
+  - platformio.ini (root) – includes variants/*/platformio.ini
+  - build.sh (optional release pipeline)
+
+Why we won’t “mash” projects
+- The attached T5S3-4.7-e-paper-PRO is a standalone PlatformIO project with its own lib/ and .pio/. We will NOT reuse its build or libs directly.
+- We will:
+  - Extract only necessary hardware definitions (pins, board JSON, peripheral init hints).
+  - Implement a MeshCore-native variant with minimal, controlled dependencies using RadioLib already declared in root platformio.ini.
+  - Keep the vendor demo as a reference only; do not include it in PlatformIO build scope.
+
+Hardware overview (from vendor demo contents)
+- MCU: ESP32‑S3
+- LoRa: SX1262 (via SPI)
+- Display: 4.7" EPD (ED047TC1), TPS65185 supply, IO expander PCA9535 (likely controls panel rails / power)
+- GPS: u-blox MIA-M10Q (UART)
+- Battery/Power: BQ25896 (charger), BQ27220 (fuel gauge)
+- RTC: PCF8563 (I2C)
+- Other libs in vendor demo: EPDiy, LVGL, RadioLib, XPowersLib, TinyGPSPlus, SensorLib
+
+Milestones
+1) Skeleton variant (LoRa + basic board)
+   - Create variant folder: variants/t5s3_eink_pro/
+   - Add:
+     - variants/t5s3_eink_pro/variant.h: pin defines (LoRa SPI/CS/RESET/BUSY/DIO1; LED; VBAT pin; GPS UART pins; I2C if needed), ADC multipliers
+     - variants/t5s3_eink_pro/target.h and target.cpp: instantiate RadioLib Module and wrapper; clocks; MicroNMEALocationProvider on Serial1 (optional gated by HAS_GPS)
+     - variants/t5s3_eink_pro/T5S3EinkBoard.h: board class derived from mesh::MainBoard (or ESP32Board if available), implement:
+       - uint16_t getBattMilliVolts()
+       - const char* getManufacturerName()
+       - reboot() and optional powerOff()
+       - onBeforeTransmit()/onAfterTransmit() for LED if present
+       - startOTAUpdate (optional, later)
+   - Add board file: boards/T5-ePaper-S3.json (copy from vendor project boards/T5-ePaper-S3.json; verify flash/PSRAM settings).
+   - Add PlatformIO envs in variants/t5s3_eink_pro/platformio.ini:
+     - T5S3_eink_companion_ble (src_dir = examples/companion_radio)
+     - T5S3_eink_repeater (src_dir = examples/simple_repeater)
+     - T5S3_eink_room_server (src_dir = examples/simple_room_server)
+   - Ensure envs extend [esp32_base] and [esp32_ota] (for OTA later). Root file: platformio.ini.
+
+2) Battery measurement and identity store
+   - Implement getBattMilliVolts():
+     - Use ADC1 channel and divider values from board docs/vendor code; if unknown, start with a conservative ADC_MULTIPLIER, and refine after bring-up.
+     - Follow patterns in src/helpers/MeshadventurerBoard.h and src/helpers/rp2040/PicoWBoard.h.
+   - Confirm IdentityStore usage:
+     - For ESP32, examples use SPIFFS; paths like "/identity" (see examples/simple_secure_chat/main.cpp and examples/companion_radio/MyMesh.cpp).
+
+3) Radio bring-up
+   - In target.cpp:
+     - RADIO_CLASS radio = new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY, SPI or a dedicated SPIClass);
+     - WRAPPER_CLASS radio_driver(radio, board);
+     - radio_init(): init SPI, LoRa pins; call radio_driver.begin(); set default params
+     - radio_set_params(), radio_set_tx_power() – mirror variants/meshadventurer/target.cpp
+     - radio_get_rng_seed(): return hardware RNG or radio RSSI noise as per existing variants
+     - radio_new_identity(): see variants/meshadventurer/target.cpp and examples/companion_radio/MyMesh.cpp usage; ensure reserved pubkey handling
+
+4) GPS (optional in v1)
+   - If GPS present:
+     - #define HAS_GPS and provide GPS pins in variant.h
+     - Instantiate MicroNMEALocationProvider on Serial1 in target.cpp (see variants/meshadventurer/target.h/.cpp)
+     - Board::begin() should power GPS (GPIO or power rail if controlled by IO expander) before Serial1 begin
+
+5) Display (e‑paper) integration (phase 2)
+   - Defer for initial merge to avoid large deps (EPDiy/LVGL).
+   - Later:
+     - Create a DISPLAY_CLASS adapter similar to helpers/ui/SSD1306Display.h interface used by examples/companion_radio (UI optional).
+     - Provide minimal text rendering pipeline (frame buffer push per refresh) to show node name, status, and BLE PIN.
+     - Manage panel power: through PCA9535 and TPS65185 sequencing (from vendor docs: docs/tps65185.pdf, docs/pca9535.pdf).
+     - Add DISPLAY_CLASS define in env and wire UI as in examples/companion_radio/main.cpp.
+
+6) Power rails and IO expander (phase 2)
+   - If EPD power requires TPS65185 + PCA9535 control:
+     - Create a small driver under variants/t5s3_eink_pro/ for power sequencing (init, enable VGL/VGH, reading OK signals).
+     - Call from board.begin() guarded by DISPLAY_CLASS only.
+
+7) Fuel gauge/charger (optional)
+   - Optional integration of BQ27220 and BQ25896 via I2C to replace raw ADC battery estimates.
+   - Implement in board class or as a sensor provider; keep optional to avoid new dependencies in base firmware.
+
+8) PlatformIO configuration details
+   - New file: variants/t5s3_eink_pro/platformio.ini
+     - For each env:
+       - extends = esp32_base and esp32_ota
+       - board = T5-ePaper-S3
+       - src_dir = examples/<app>
+       - build_flags additions:
+         - -I variants/t5s3_eink_pro
+         - -D USE_SX1262
+         - Pin and feature macros if not placed in variant.h (prefer putting in variant.h)
+       - build_src_filter:
+         - ${arduino_base.build_src_filter}
+         - +<variants/t5s3_eink_pro/*.cpp>
+     - Keep dependencies minimal; use root-declared RadioLib. Do not add EPDiy/LVGL until display phase.
+   - Ensure root platformio.ini already includes extra_configs = variants/*/platformio.ini (it does).
+
+9) Files to add (expected layout)
+   - boards/T5-ePaper-S3.json
+   - variants/t5s3_eink_pro/
+     - platformio.ini
+     - variant.h
+     - target.h
+     - target.cpp
+     - T5S3EinkBoard.h
+     - (optional later) EPD power helpers, display class adapter
+
+10) Pin map (to collect from vendor project)
+   - From the attached T5S3-4.7-e-paper-PRO/boards/T5-ePaper-S3.json and examples, extract:
+     - LoRa: P_LORA_NSS, P_LORA_BUSY, P_LORA_RESET, P_LORA_DIO_1
+     - SPI bus pins (SCK/MISO/MOSI) if custom (else HSPI/VSPI defaults)
+     - LED_PIN (if any)
+     - PIN_VBAT_READ and ADC_MULTIPLIER
+     - GPS_TX_PIN, GPS_RX_PIN and GPS power pin(s)
+     - I2C pins for IO expander/RTC (SDA/SCL)
+   - Add defines to variants/t5s3_eink_pro/variant.h (example format in variants/meshadventurer/variant.h)
+
+11) Initial build targets and tests
+   - Build without display/GPS first:
+     - pio run -e T5S3_eink_companion_ble
+     - pio run -e T5S3_eink_repeater
+     - pio run -e T5S3_eink_room_server
+   - Flash and verify:
+     - Radio init ok, self advert sent (see examples/companion_radio/MyMesh.cpp begin() and examples/simple_repeater/main.cpp begin()).
+     - Identity generation and persisted storage (SPIFFS).
+     - Battery mv reporting via CLI (CommonCLI integration; see src/helpers/CommonCLI.h and example apps using _cli).
+   - Then enable GPS and validate NMEA lock reporting via telemetry.
+   - Phase 2: add DISPLAY_CLASS and verify rendering + refresh timing.
+
+12) Common pitfalls and resolutions
+   - Do not include the vendor project’s lib/ in MeshCore build; keep variant self-contained.
+   - Avoid duplicate RadioLib versions by relying on root platformio.ini’s declared version.
+   - If SPI bus conflicts (shared with EPD), ensure LoRa and display are not active simultaneously in early versions; serialize access, or use separate SPI buses if hardware supports.
+   - ESP32‑S3 PSRAM/flash settings must match board JSON; wrong settings can cause random crashes.
+   - If OTA is needed, add AsyncElegantOTA (root [esp32_ota] has it) and implement startOTAUpdate in the board class later.
+
+13) Example snippets (to implement in variant)
+- target.h pattern: see variants/meshadventurer/target.h for includes, externs, and functions to expose: radio_init(), radio_get_rng_seed(), radio_set_params(), radio_set_tx_power(), radio_new_identity().
+- Board class methods: see src/helpers/MeshadventurerBoard.h and src/helpers/rp2040/PicoWBoard.h for getBattMilliVolts() patterns and manufacturer strings.
+- Example apps expect target.h and board globals; see variants/meshadventurer/target.cpp.
+
+14) Acceptance criteria
+- All three firmware types compile and run on T5 S3 without display:
+  - Companion: app pairing and basic messaging over LoRa works.
+  - Repeater: self advert and forwarding works, CLI reachable over serial.
+  - Room Server: self advert, posts storage in FS, CLI admin works.
+- Battery voltage returns reasonable values.
+- No unintended dependencies from vendor project are introduced.
+- Optional: GPS lock reported in telemetry (phase 1.1).
+- Optional: e‑paper UI (phase 2) functional with clean power sequencing.
+
+Appendix A – PIO env template (to be placed in variants/t5s3_eink_pro/platformio.ini)
+[env:T5S3_eink_companion_ble]
+extends = esp32_base, esp32_ota
+board = T5-ePaper-S3
+src_dir = examples/companion_radio
+build_flags =
+  ${esp32_base.build_flags}
+  -I variants/t5s3_eink_pro
+  -D USE_SX1262
+build_src_filter =
+  ${esp32_base.build_src_filter}
+  +<variants/t5s3_eink_pro/*.cpp>
+
+[env:T5S3_eink_repeater]
+extends = esp32_base
+board = T5-ePaper-S3
+src_dir = examples/simple_repeater
+build_flags =
+  ${esp32_base.build_flags}
+  -I variants/t5s3_eink_pro
+  -D USE_SX1262
+build_src_filter =
+  ${esp32_base.build_src_filter}
+  +<variants/t5s3_eink_pro/*.cpp>
+
+[env:T5S3_eink_room_server]
+extends = esp32_base
+board = T5-ePaper-S3
+src_dir = examples/simple_room_server
+build_flags =
+  ${esp32_base.build_flags}
+  -I variants/t5s3_eink_pro
+  -D USE_SX1262
+build_src_filter =
+  ${esp32_base.build_src_filter}
+  +<variants/t5s3_eink_pro/*.cpp>
+
+Appendix B – Initial variant.h checklist (pins/macros)
+- Define:
+  - P_LORA_NSS, P_LORA_BUSY, P_LORA_RESET, P_LORA_DIO_1
+  - Optional SX126X_RXEN (if needed by wrapper)
+  - LED_PIN (if present)
+  - PIN_VBAT_READ, ADC_MULTIPLIER (or VBAT_DIVIDER)
+  - GPS_RX_PIN, GPS_TX_PIN, PIN_GPS_EN (if gated)
+  - I2C_SDA, I2C_SCL
+  - USE_SX1262
+- Optionally HAS_GPS and DISPLAY_CLASS for later phases.
+
+Notes
+- Use existing code patterns to minimize risk:
+  - target glue: variants/meshadventurer/target.cpp
+  - board abstraction: src/helpers/MeshadventurerBoard.h
+- Keep display and advanced power rails for phase 2 to ensure early success on core MeshCore

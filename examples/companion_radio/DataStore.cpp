@@ -203,6 +203,7 @@ void DataStore::savePrefs(const NodePrefs& _prefs, double node_lat, double node_
 }
 
 void DataStore::loadContacts(DataStoreHost* host) {
+#include <Arduino.h>
   if (_fs->exists("/contacts3")) {
 #if defined(RP2040_PLATFORM)
     File file = _fs->open("/contacts3", "r");
@@ -211,7 +212,7 @@ void DataStore::loadContacts(DataStoreHost* host) {
 #endif
     if (file) {
       bool full = false;
-      while (!full) {
+  while (!full) {
         ContactInfo c;
         uint8_t pub_key[32];
         uint8_t unused;
@@ -231,8 +232,10 @@ void DataStore::loadContacts(DataStoreHost* host) {
 
         if (!success) break; // EOF
 
-        c.id = mesh::Identity(pub_key);
-        if (!host->onContactLoaded(c)) full = true;
+  c.id = mesh::Identity(pub_key);
+  if (!host->onContactLoaded(c)) full = true;
+  // Cooperative yield each iteration to keep scheduler and watchdog happy
+  delay(1);
       }
       file.close();
     }
@@ -240,6 +243,7 @@ void DataStore::loadContacts(DataStoreHost* host) {
 }
 
 void DataStore::saveContacts(DataStoreHost* host) {
+#include <Arduino.h>
   File file = openWrite(_fs, "/contacts3");
   if (file) {
     uint32_t idx = 0;
@@ -262,13 +266,16 @@ void DataStore::saveContacts(DataStoreHost* host) {
 
       if (!success) break; // write failed
 
-      idx++;  // advance to next contact
+  idx++;  // advance to next contact
+  // Cooperative yield each iteration to keep scheduler and watchdog happy
+  delay(1);
     }
     file.close();
   }
 }
 
 void DataStore::loadChannels(DataStoreHost* host) {
+#include <Arduino.h>
   if (_fs->exists("/channels2")) {
 #if defined(RP2040_PLATFORM)
     File file = _fs->open("/channels2", "r");
@@ -278,7 +285,7 @@ void DataStore::loadChannels(DataStoreHost* host) {
     if (file) {
       bool full = false;
       uint8_t channel_idx = 0;
-      while (!full) {
+  while (!full) {
         ChannelDetails ch;
         uint8_t unused[4];
 
@@ -288,11 +295,13 @@ void DataStore::loadChannels(DataStoreHost* host) {
 
         if (!success) break; // EOF
 
-        if (host->onChannelLoaded(channel_idx, ch)) {
+  if (host->onChannelLoaded(channel_idx, ch)) {
           channel_idx++;
         } else {
           full = true;
         }
+  // Cooperative yield each iteration to keep scheduler and watchdog happy
+  delay(1);
       }
       file.close();
     }
@@ -300,6 +309,7 @@ void DataStore::loadChannels(DataStoreHost* host) {
 }
 
 void DataStore::saveChannels(DataStoreHost* host) {
+#include <Arduino.h>
   File file = openWrite(_fs, "/channels2");
   if (file) {
     uint8_t channel_idx = 0;
@@ -313,7 +323,9 @@ void DataStore::saveChannels(DataStoreHost* host) {
       success = success && (file.write((uint8_t *)ch.channel.secret, 32) == 32);
 
       if (!success) break; // write failed
-      channel_idx++;
+  channel_idx++;
+  // Cooperative yield each iteration to keep scheduler and watchdog happy
+  delay(1);
     }
     file.close();
   }

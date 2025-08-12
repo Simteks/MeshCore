@@ -18,6 +18,7 @@
 #include <helpers/CommonCLI.h>
 #include <RTClib.h>
 #include <target.h>
+#include <boot/BootSequence.h>
 
 /* ------------------------------ Config -------------------------------- */
 
@@ -971,8 +972,10 @@ static char command[MAX_POST_TEXT_LEN+1];
 void setup() {
   Serial.begin(115200);
   delay(1000);
-
+  boot::begin(FIRMWARE_ROLE, FIRMWARE_VERSION, FIRMWARE_BUILD_DATE);
+  boot::init_pins();
   board.begin();
+  boot::step("Board begin", true);
 
 #ifdef DISPLAY_CLASS
   if (display.begin()) {
@@ -982,7 +985,11 @@ void setup() {
   }
 #endif
 
-  if (!radio_init()) { halt(); }
+  boot::init_spi(BOARD_SPI_SCLK, BOARD_SPI_MISO, BOARD_SPI_MOSI);
+  boot::init_i2c(PIN_BOARD_SDA, PIN_BOARD_SCL);
+
+  if (!radio_init()) { boot::step("Radio init", false); halt(); }
+  boot::step("Radio init", true);
 
   fast_rng.begin(radio_get_rng_seed());
 
@@ -1018,8 +1025,13 @@ void setup() {
   command[0] = 0;
 
   sensors.begin();
+  boot::step("Sensors begin", true);
 
   the_mesh.begin(fs);
+  boot::step("Mesh begin", true);
+  boot::log_radio_params(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_TX_POWER);
+  boot::print_hw_summary();
+  boot::end();
 
 #ifdef DISPLAY_CLASS
   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);

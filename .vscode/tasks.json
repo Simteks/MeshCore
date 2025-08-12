@@ -1,0 +1,180 @@
+{
+  // Generated to expose build tasks for active PlatformIO envs
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Free COM8",
+      "type": "shell",
+      "group": "build",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-File",
+          ".vscode/scripts/free-com.ps1",
+          "-ComPort",
+          "COM8"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO Build: T5S3_eink_repeater",
+      "type": "shell",
+      "group": "build",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-Command",
+          "$scripts = Join-Path (Join-Path $env:APPDATA 'Python') 'Python310/Scripts'; if (Test-Path $scripts) { $env:Path = \"$scripts;$env:Path\" }; $pio = Get-Command pio -ErrorAction SilentlyContinue; if ($pio) { pio run -e T5S3_eink_repeater; exit $LASTEXITCODE }; $platformio = Get-Command platformio -ErrorAction SilentlyContinue; if ($platformio) { platformio run -e T5S3_eink_repeater; exit $LASTEXITCODE }; $penv = Join-Path $env:USERPROFILE '.platformio/penv/Scripts/platformio.exe'; if (Test-Path $penv) { & \"$penv\" run -e T5S3_eink_repeater; exit $LASTEXITCODE }; throw 'PlatformIO CLI not found. Install the PlatformIO VS Code extension or PlatformIO Core (pip install platformio).';"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO Upload: T5S3_eink_repeater",
+      "type": "shell",
+      "group": "build",
+      "dependsOn": ["Free COM8"],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-Command",
+          "$scripts = Join-Path (Join-Path $env:APPDATA 'Python') 'Python310/Scripts'; if (Test-Path $scripts) { $env:Path = \"$scripts;$env:Path\" }; $pio = Get-Command pio -ErrorAction SilentlyContinue; if ($pio) { pio run -e T5S3_eink_repeater -t upload; exit $LASTEXITCODE }; $platformio = Get-Command platformio -ErrorAction SilentlyContinue; if ($platformio) { platformio run -e T5S3_eink_repeater -t upload; exit $LASTEXITCODE }; $penv = Join-Path $env:USERPROFILE '.platformio/penv/Scripts/platformio.exe'; if (Test-Path $penv) { & \"$penv\" run -e T5S3_eink_repeater -t upload; exit $LASTEXITCODE }; throw 'PlatformIO CLI not found. Install the PlatformIO VS Code extension or PlatformIO Core (pip install platformio).';"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO Upload: T5S3_eink_companion_ble",
+      "type": "shell",
+      "group": "build",
+      "dependsOn": ["Free COM8"],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-Command",
+          "$scripts = Join-Path (Join-Path $env:APPDATA 'Python') 'Python310/Scripts'; if (Test-Path $scripts) { $env:Path = \"$scripts;$env:Path\" }; $pio = Get-Command pio -ErrorAction SilentlyContinue; if ($pio) { pio run -e T5S3_eink_companion_ble -t upload; exit $LASTEXITCODE }; $platformio = Get-Command platformio -ErrorAction SilentlyContinue; if ($platformio) { platformio run -e T5S3_eink_companion_ble -t upload; exit $LASTEXITCODE }; $penv = Join-Path $env:USERPROFILE '.platformio/penv/Scripts/platformio.exe'; if (Test-Path $penv) { & \"$penv\" run -e T5S3_eink_companion_ble -t upload; exit $LASTEXITCODE }; throw 'PlatformIO CLI not found. Install the PlatformIO VS Code extension or PlatformIO Core (pip install platformio).';"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO Upload: T5S3_eink_room_server",
+      "type": "shell",
+      "group": "build",
+      "dependsOn": ["Free COM8"],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-Command",
+          "$scripts = Join-Path (Join-Path $env:APPDATA 'Python') 'Python310/Scripts'; if (Test-Path $scripts) { $env:Path = \"$scripts;$env:Path\" }; $pio = Get-Command pio -ErrorAction SilentlyContinue; if ($pio) { pio run -e T5S3_eink_room_server -t upload; exit $LASTEXITCODE }; $platformio = Get-Command platformio -ErrorAction SilentlyContinue; if ($platformio) { platformio run -e T5S3_eink_room_server -t upload; exit $LASTEXITCODE }; $penv = Join-Path $env:USERPROFILE '.platformio/penv/Scripts/platformio.exe'; if (Test-Path $penv) { & \"$penv\" run -e T5S3_eink_room_server -t upload; exit $LASTEXITCODE }; throw 'PlatformIO CLI not found. Install the PlatformIO VS Code extension or PlatformIO Core (pip install platformio).';"
+        ]
+      },
+      "problemMatcher": []
+    }
+  ,
+  {
+      "label": "PIO Build: T5S3_eink_companion_ble",
+      "type": "shell",
+      "group": "build",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-Command",
+          "$scripts = Join-Path (Join-Path $env:APPDATA 'Python') 'Python310/Scripts'; if (Test-Path $scripts) { $env:Path = \"$scripts;$env:Path\" }; $pio = Get-Command pio -ErrorAction SilentlyContinue; if ($pio) { pio run -e T5S3_eink_companion_ble; exit $LASTEXITCODE }; $platformio = Get-Command platformio -ErrorAction SilentlyContinue; if ($platformio) { platformio run -e T5S3_eink_companion_ble; exit $LASTEXITCODE }; $penv = Join-Path $env:USERPROFILE '.platformio/penv/Scripts/platformio.exe'; if (Test-Path $penv) { & \"$penv\" run -e T5S3_eink_companion_ble; exit $LASTEXITCODE }; throw 'PlatformIO CLI not found. Install the PlatformIO VS Code extension or PlatformIO Core (pip install platformio).';"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO Build: T5S3_eink_room_server",
+      "type": "shell",
+      "group": "build",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-Command",
+          "$scripts = Join-Path (Join-Path $env:APPDATA 'Python') 'Python310/Scripts'; if (Test-Path $scripts) { $env:Path = \"$scripts;$env:Path\" }; $pio = Get-Command pio -ErrorAction SilentlyContinue; if ($pio) { pio run -e T5S3_eink_room_server; exit $LASTEXITCODE }; $platformio = Get-Command platformio -ErrorAction SilentlyContinue; if ($platformio) { platformio run -e T5S3_eink_room_server; exit $LASTEXITCODE }; $penv = Join-Path $env:USERPROFILE '.platformio/penv/Scripts/platformio.exe'; if (Test-Path $penv) { & \"$penv\" run -e T5S3_eink_room_server; exit $LASTEXITCODE }; throw 'PlatformIO CLI not found. Install the PlatformIO VS Code extension or PlatformIO Core (pip install platformio).';"
+        ]
+      },
+      "problemMatcher": []
+    }
+    ,
+    {
+      "label": "PIO Build All",
+      "type": "shell",
+      "group": "build",
+      "dependsOn": [
+        "PIO Build: T5S3_eink_repeater",
+        "PIO Build: T5S3_eink_companion_ble",
+        "PIO Build: T5S3_eink_room_server"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+    ,
+    {
+      "label": "PIO Monitor (115200)",
+      "type": "shell",
+      "group": "test",
+  "dependsOn": ["Free COM8"],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy", "Bypass",
+          "-Command",
+          "$scripts = Join-Path (Join-Path $env:APPDATA 'Python') 'Python310/Scripts'; if (Test-Path $scripts) { $env:Path = \"$scripts;$env:Path\" }; $pio = Get-Command pio -ErrorAction SilentlyContinue; if ($pio) { pio device monitor -b 115200; exit $LASTEXITCODE }; $platformio = Get-Command platformio -ErrorAction SilentlyContinue; if ($platformio) { platformio device monitor -b 115200; exit $LASTEXITCODE }; $penv = Join-Path $env:USERPROFILE '.platformio/penv/Scripts/platformio.exe'; if (Test-Path $penv) { & \"$penv\" device monitor -b 115200; exit $LASTEXITCODE }; throw 'PlatformIO CLI not found. Install the PlatformIO VS Code extension or PlatformIO Core (pip install platformio).';"
+        ]
+      },
+      "problemMatcher": []
+    }
+    ,
+    {
+      "label": "PIO Upload+Monitor: T5S3_eink_repeater",
+      "type": "shell",
+      "dependsOn": [
+        "PIO Upload: T5S3_eink_repeater",
+        "PIO Monitor (115200)"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+    ,
+    {
+      "label": "PIO Upload+Monitor: T5S3_eink_companion_ble",
+      "type": "shell",
+      "dependsOn": [
+        "PIO Upload: T5S3_eink_companion_ble",
+        "PIO Monitor (115200)"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+    ,
+    {
+      "label": "PIO Upload+Monitor: T5S3_eink_room_server",
+      "type": "shell",
+      "dependsOn": [
+        "PIO Upload: T5S3_eink_room_server",
+        "PIO Monitor (115200)"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
+}

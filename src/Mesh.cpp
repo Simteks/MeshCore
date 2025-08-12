@@ -1,5 +1,26 @@
 #include "Mesh.h"
-//#include <Arduino.h>
+#include <Arduino.h>
+#if defined(ESP32)
+#include <esp_task_wdt.h>
+#endif
+
+// Throttle expensive ADVERT signature verification to avoid starving IDLE tasks
+static volatile uint32_t g_next_advert_verify_ms = 0;
+
+// Small cooperative yield helper to avoid WDT during long loops
+static inline void mesh_cooperative_yield() {
+#if defined(ESP32)
+  // Reset the task WDT if enabled; this also yields
+  esp_task_wdt_reset();
+#endif
+#if defined(ARDUINO_ARCH_ESP32) || defined(ARDUINO_ARCH_ESP8266)
+  // Use a 1-tick delay to give IDLE time to run and feed the watchdog
+  delay(1);
+#else
+  // Fallback minimal yield
+  delayMicroseconds(1000);
+#endif
+}
 
 namespace mesh {
 
@@ -93,7 +114,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
   DispatcherAction action = ACTION_RELEASE;
 
   switch (pkt->getPayloadType()) {
-    case PAYLOAD_TYPE_ACK: {
+  case PAYLOAD_TYPE_ACK: {
       int i = 0;
       uint32_t ack_crc;
       memcpy(&ack_crc, &pkt->payload[i], 4); i += 4;
@@ -103,7 +124,9 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         onAckRecv(pkt, ack_crc);
         action = routeRecvPacket(pkt);
       }
-      break;
+  // yield occasionally while processing to avoid starving other tasks
+  mesh_cooperative_yield();
+  break;
     }
     case PAYLOAD_TYPE_PATH:
     case PAYLOAD_TYPE_REQ:
@@ -163,7 +186,9 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         }
         action = routeRecvPacket(pkt);
       }
-      break;
+  // yield occasionally while processing to avoid starving other tasks
+  mesh_cooperative_yield();
+  break;
     }
     case PAYLOAD_TYPE_ANON_REQ: {
       int i = 0;
@@ -190,7 +215,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         }
         action = routeRecvPacket(pkt);
       }
-      break;
+  mesh_cooperative_yield();
+  break;
     }
     case PAYLOAD_TYPE_GRP_DATA: 
     case PAYLOAD_TYPE_GRP_TXT: {
@@ -216,9 +242,10 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         }
         action = routeRecvPacket(pkt);
       }
-      break;
+  mesh_cooperative_yield();
+  break;
     }
-    case PAYLOAD_TYPE_ADVERT: {
+  case PAYLOAD_TYPE_ADVERT: {
       int i = 0;
       Identity id;
       memcpy(id.pub_key, &pkt->payload[i], PUB_KEY_SIZE); i += PUB_KEY_SIZE;
@@ -232,6 +259,13 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
       } else if (self_id.matches(id.pub_key)) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): receiving SELF advert packet", getLogDateTime());
       } else if (!_tables->hasSeen(pkt)) {
+        // If we're processing too many adverts in a burst, skip verification for now
+        uint32_t now_ms = millis();
+        if (now_ms < g_next_advert_verify_ms) {
+          action = routeRecvPacket(pkt);
+          mesh_cooperative_yield();
+          break;
+        }
         uint8_t* app_data = &pkt->payload[i];
         int app_data_len = pkt->payload_len - i;
         if (app_data_len > MAX_ADVERT_DATA_SIZE) { app_data_len = MAX_ADVERT_DATA_SIZE; }
@@ -244,7 +278,10 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
           memcpy(&message[msg_len], id.pub_key, PUB_KEY_SIZE); msg_len += PUB_KEY_SIZE;
           memcpy(&message[msg_len], &timestamp, 4); msg_len += 4;
           memcpy(&message[msg_len], app_data, app_data_len); msg_len += app_data_len;
-
+          #if defined(ESP32)
+          // Reset WDT just before costly Ed25519 verify
+          esp_task_wdt_reset();
+          #endif
           is_ok = id.verify(signature, message, msg_len);
         }
         if (is_ok) {
@@ -254,8 +291,11 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         } else {
           MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): received advertisement with forged signature! (app_data_len=%d)", getLogDateTime(), app_data_len);
         }
+        // allow next advert verify after a short interval
+        g_next_advert_verify_ms = millis() + 25; // ~25ms spacing between heavy verify ops
       }
-      break;
+  mesh_cooperative_yield();
+  break;
     }
     case PAYLOAD_TYPE_RAW_CUSTOM: {
       if (pkt->isRouteDirect() && !_tables->hasSeen(pkt)) {
@@ -293,7 +333,8 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
     default:
       MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): unknown payload type, header: %d", getLogDateTime(), (int) pkt->header);
       // Don't flood route unknown packet types!   action = routeRecvPacket(pkt);
-      break;
+  delay(0);
+  break;
   }
   return action;
 }
